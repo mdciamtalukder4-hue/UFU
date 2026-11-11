@@ -1,0 +1,47 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+env:
+  GODOT_VERSION: 4.2.2
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container:
+      image: barichello/godot-ci:4.2.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          if [ "$HOME" != "/root" ]; then
+            mkdir -p ~/.local/share/godot/export_templates
+            mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          fi
+          unzip -q UFU_build.zip
+      - name: Make debug key
+        run: keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore /tmp/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 9999 -deststoretype pkcs12
+      - name: Configure Godot
+        run: |
+          JAVA_DIR=$(dirname $(dirname $(readlink -f $(which keytool))))
+          SDK_DIR=${ANDROID_HOME:-/usr/lib/android-sdk}
+          echo "java=$JAVA_DIR sdk=$SDK_DIR"
+          mkdir -p ~/.config/godot
+          printf '%s\n' '[gd_resource type="EditorSettings" format=3]' '' '[resource]' \
+            "export/android/java_sdk_path = \"$JAVA_DIR\"" \
+            "export/android/android_sdk_path = \"$SDK_DIR\"" \
+            'export/android/debug_keystore = "/tmp/debug.keystore"' \
+            'export/android/debug_keystore_user = "androiddebugkey"' \
+            'export/android/debug_keystore_pass = "android"' \
+            > ~/.config/godot/editor_settings-4.tres
+      - name: Export APK
+        working-directory: UFU
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /tmp/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p build/android
+          godot --headless --verbose --import || true
+          godot --headless --verbose --export-debug "Android" build/android/UFU.apk
+      - uses: actions/upload-artif
